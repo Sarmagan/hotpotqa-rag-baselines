@@ -38,10 +38,10 @@ Script: `rag_hotpotqa_eval_submodular.py`. For each question, **all** sentence-l
 
 - **Modular term (query relevance):** per-chunk scores are **nonnegative** cosine similarities, \max(0, q^\top x_i), with the same bi-encoder as semantic top-k (`[sentence-transformers/all-MiniLM-L6-v2](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2)`, L2-normalized query and chunks).
 - **Facility Location (diversity):** an n \times n nonnegative similarity matrix over chunk embeddings instantiates the FL function. By default this matrix is the **nonnegative cosine Gram** \max(0, X X^\top) where rows of X are chunk embeddings; optionally you can pass a Submarine `mat.transform(..., expr)` spec via `--fl-transform`.
-- **Objective:** \(f(S) = (1-\alpha)\,\mathrm{MO}(\text{relevance}) + \alpha\,\mathrm{FL}(\text{matrix})\) with \(\alpha =\) `--mixture-coefficient` (default `0.5`). Subset selection is cardinality-\(k\) greedy maximization with **`k = top_k`**.
+- **Objective:** \(f(S) = (1-\alpha)\,\mathrm{MO}(\text{relevance}) + \alpha\,\mathrm{FL}(\text{matrix})\) with \(\alpha =\) `--mixture-coefficient` (FL weight; default `0.5`). Subset selection is cardinality-\(k\) greedy maximization with **`k = top_k`**. The 100-example results table uses **`--mixture-coefficient 0.6`**.
 - **Greedy optimizer:** default is **`naive_greedy_opt`**. Alternatives: `accelerated_greedy_max`, `stochastic_greedy_max`, `parallel_greedy_max` via `--greedy-algorithm naive|accelerated|stochastic|parallel`.
 
-Default run matches the main script: `top_k=10`, `--mixture-coefficient 0.5`, `--greedy-algorithm naive`, first **100** validation examples. Metrics are saved as `submodular_fl_mo.json`.
+Default CLI matches the main script on example count: `top_k=10`, `--mixture-coefficient 0.5`, `--greedy-algorithm naive`, first **100** validation examples. Metrics are saved as `submodular_fl_mo.json`. For the reported 100-example table row, run with **`--mixture-coefficient 0.6`** (FL weight 0.6).
 
 ## Models
 
@@ -83,10 +83,10 @@ Evaluation uses the same hyperparameters as in each script’s `main()` unless y
 | Semantic top-k       | 32.0%            | 0.4075     |
 | MMR                  | 30.0%            | 0.4139     |
 | Cross-encoder        | 39.0%            | 0.4612     |
-| Submodular (FL + MO) | 33.0%            | 0.4371     |
+| Submodular (FL + MO) | 35.0%            | 0.4397     |
 
 
-*All rows: 100 examples, `top_k=10`; MMR and cross-encoder use `fetch_k=50` (see [top_k vs fetch_k](#top_k-vs-fetch_k)); MMR uses `mmr_lambda=0.5` (`rag_hotpotqa_eval.py`). Submodular: `mixture_coefficient=0.5`, **`greedy_algorithm=naive`** (default `naive_greedy_opt`)—the **Submodular** EM/ROUGE figures match that setup.*
+*All rows: 100 examples, `top_k=10`; MMR and cross-encoder use `fetch_k=50` (see [top_k vs fetch_k](#top_k-vs-fetch_k)); MMR uses `mmr_lambda=0.5` (`rag_hotpotqa_eval.py`). Submodular: **`--mixture-coefficient 0.6`** (weight on the FL term), **`greedy_algorithm=naive`** (default `naive_greedy_opt`)—the **Submodular** EM/ROUGE figures match that setup.*
 
 ### Full validation split
 
