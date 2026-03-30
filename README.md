@@ -17,18 +17,19 @@ The distractor setting provides several paragraphs per question (gold and distra
 
 ## Retrieval baselines
 
-Four methods are implemented in `rag_hotpotqa_eval.py`:
+Several retrieval methods are implemented in `rag_hotpotqa_eval.py`:
 
 
-| Baseline           | Idea                                                                                                                                                 |
-| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **BM25**           | Lexical retrieval ([Okapi BM25](https://pypi.org/project/rank-bm25/))                                                                                |
-| **Semantic top-k** | Dense bi-encoder: cosine similarity between query and chunk embeddings                                                                               |
-| **MMR**            | [Maximal Marginal Relevance](https://aclanthology.org/X98-1025/) (Carbonell & Goldstein, 1998): trade off relevance vs. diversity over a coarse pool |
-| **Cross-encoder**  | Two stages: bi-encoder retrieves a coarse pool, then a **cross-encoder** scores (query, passage) pairs and reranks to the final top-k                |
+| Baseline                 | Idea                                                                                                                                                 |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **BM25**                 | Lexical retrieval ([Okapi BM25](https://pypi.org/project/rank-bm25/))                                                                                |
+| **Semantic top-k**       | Dense bi-encoder: cosine similarity between query and chunk embeddings                                                                               |
+| **MMR**                  | [Maximal Marginal Relevance](https://aclanthology.org/X98-1025/) (Carbonell & Goldstein, 1998): trade off relevance vs. diversity over a coarse pool |
+| **Cross-encoder**        | Two stages: bi-encoder retrieves a coarse pool (`fetch_k`), then a **cross-encoder** scores (query, passage) pairs and reranks to the final top-k    |
+| **Cross-encoder (full)** | Single stage: the **cross-encoder** scores every (query, chunk) pair on the **full** chunk set (no bi-encoder); keep top-`k` (`--method cross_encoder_full`) |
 
 
-A fifth baseline, **submodular FL + modular** (`rag_hotpotqa_eval_submodular.py`), is described below.
+A further baseline, **submodular FL + modular** (`rag_hotpotqa_eval_submodular.py`), is described below.
 
 Shared generation settings: chat prompt with a system instruction to answer briefly from passages only; **8 192** token prompt budget; passages are numbered and truncated token-wise if needed.
 
@@ -38,10 +39,10 @@ Script: `rag_hotpotqa_eval_submodular.py`. For each question, **all** sentence-l
 
 - **Modular term (query relevance):** per-chunk scores are **nonnegative** cosine similarities, \max(0, q^\top x_i), with the same bi-encoder as semantic top-k (`[sentence-transformers/all-MiniLM-L6-v2](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2)`, L2-normalized query and chunks).
 - **Facility Location (diversity):** an n \times n nonnegative similarity matrix over chunk embeddings instantiates the FL function. By default this matrix is the **nonnegative cosine Gram** \max(0, X X^\top) where rows of X are chunk embeddings; optionally you can pass a Submarine `mat.transform(..., expr)` spec via `--fl-transform`.
-- **Objective:** \(f(S) = (1-\alpha)\,\mathrm{MO}(\text{relevance}) + \alpha\,\mathrm{FL}(\text{matrix})\) with \(\alpha =\) `--mixture-coefficient` (FL weight; default `0.5`). Subset selection is cardinality-\(k\) greedy maximization with **`k = top_k`**. The 100-example results table uses **`--mixture-coefficient 0.6`**.
+- **Objective:** \(f(S) = (1-\alpha)\,\mathrm{MO}(\text{relevance}) + \alpha\,\mathrm{FL}(\text{matrix})\) with \(\alpha =\) `--mixture-coefficient` (FL weight; default `0.5`). Subset selection is cardinality-\(k\) greedy maximization with **`k = top_k`**. The 100-example table uses **`--mixture-coefficient 0.6`** for **Submodular (FL + MO)** (bi-encoder modular) and **`--mixture-coefficient 0.4`** for **Submodular (FL + MO, CE mod.)**.
 - **Greedy optimizer:** default is **`naive_greedy_opt`**. Alternatives: `accelerated_greedy_max`, `stochastic_greedy_max`, `parallel_greedy_max` via `--greedy-algorithm naive|accelerated|stochastic|parallel`.
 
-Default CLI matches the main script on example count: `top_k=10`, `--mixture-coefficient 0.5`, `--greedy-algorithm naive`, first **100** validation examples. Metrics are saved as `submodular_fl_mo.json`. For the reported 100-example table row, run with **`--mixture-coefficient 0.6`** (FL weight 0.6).
+Default CLI matches the main script on example count: `top_k=10`, `--mixture-coefficient 0.5`, `--greedy-algorithm naive`, first **100** validation examples. Metrics are saved as `submodular_fl_mo.json`. For the reported **bi-encoder modular** table row, run **`--mixture-coefficient 0.6`**. For **CE modular**, run **`--modular-source cross_encoder --mixture-coefficient 0.4`** (metrics in `submodular_fl_mo_ce.json`).
 
 ## Models
 
@@ -50,7 +51,7 @@ Default CLI matches the main script on example count: `top_k=10`, `--mixture-coe
 | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **LLM**                      | `[meta-llama/Llama-3.2-3B-Instruct](https://huggingface.co/meta-llama/Llama-3.2-3B-Instruct)` — `torch.bfloat16`, `device_map="auto"`, greedy decoding, `max_new_tokens=64` |
 | **Bi-encoder (embeddings)**  | `[sentence-transformers/all-MiniLM-L6-v2](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2)` — L2-normalized embeddings; similarity = dot product              |
-| **Cross-encoder (reranker)** | `[mixedbread-ai/mxbai-rerank-large-v1](https://huggingface.co/mixedbread-ai/mxbai-rerank-large-v1)` — used only for the cross-encoder baseline                              |
+| **Cross-encoder (reranker)** | `[mixedbread-ai/mxbai-rerank-large-v1](https://huggingface.co/mixedbread-ai/mxbai-rerank-large-v1)` — cross-encoder baseline and submodular **CE modular** term (`--modular-source cross_encoder`) |
 
 
 ## Metrics
@@ -62,13 +63,13 @@ Default CLI matches the main script on example count: `top_k=10`, `--mixture-coe
 
 All baselines use `**top_k`**: how many passages are packed into the prompt for the LLM.
 
-**MMR** and the **cross-encoder** baseline also use `**fetch_k`** — they do not run diversity or reranking on the full corpus every time. The pipeline is:
+**MMR** and the **two-stage cross-encoder** baseline also use `**fetch_k`** — they do not run diversity or reranking on the full corpus every time. The pipeline is:
 
 1. **Bi-encoder**: take the `**fetch_k`** chunks with highest cosine similarity to the query (the *candidate pool*).
 2. **MMR**: from that pool only, greedily pick `**top_k*`* chunks using the MMR score (relevance vs. redundancy).
-3. **Cross-encoder**: score every (query, chunk) pair in that pool with the cross-encoder, then keep the `**top_k`** highest-scoring chunks.
+3. **Cross-encoder (two-stage)**: score every (query, chunk) pair in that pool with the cross-encoder, then keep the `**top_k`** highest-scoring chunks.
 
-So `fetch_k` is the coarse pool size; `top_k` is the final shortlist size. **BM25** and **semantic top-k** only need `top_k` (they rank all chunks and return the top `top_k`).
+So `fetch_k` is the coarse pool size; `top_k` is the final shortlist size. **BM25**, **semantic top-k**, and **cross-encoder (full)** rank from all chunks (full ground set) and only need `top_k`. **Cross-encoder (full)** uses `--ce-predict-batch-size` (default 32) for batched `CrossEncoder.predict` over all pairs.
 
 ## Results (validation subset)
 
@@ -77,36 +78,40 @@ Evaluation uses the same hyperparameters as in each script’s `main()` unless y
 **Fair comparison (100-example subset):** All methods below use the **same** examples—the first **100** rows of the Hugging Face `**hotpot_qa` / `distractor` / `validation`** split, in dataset order (`dataset.select(range(100))`). Scripts: `rag_hotpotqa_eval.py --num-examples 100` (default) and `rag_hotpotqa_eval_submodular.py --num-examples 100` (default).
 
 
-| Retrieval method     | Exact Match (EM) | ROUGE-L F1 |
-| -------------------- | ---------------- | ---------- |
-| BM25                 | 34.0%            | 0.4249     |
-| Semantic top-k       | 32.0%            | 0.4075     |
-| MMR                  | 30.0%            | 0.4139     |
-| Cross-encoder        | 39.0%            | 0.4612     |
-| Submodular (FL + MO) | 35.0%            | 0.4397     |
+| Retrieval method              | Exact Match (EM) | ROUGE-L F1 |
+| ----------------------------- | ---------------- | ---------- |
+| BM25                          | 34.0%            | 0.4249     |
+| Semantic top-k                | 32.0%            | 0.4075     |
+| MMR                           | 30.0%            | 0.4139     |
+| Cross-encoder                 | 39.0%            | 0.4612     |
+| Cross-encoder (full)          | 39.0%            | 0.4612     |
+| Submodular (FL + MO)          | 35.0%            | 0.4397     |
+| Submodular (FL + MO, CE mod.) | 41.0%            | 0.5138     |
 
 
-*All rows: 100 examples, `top_k=10`; MMR and cross-encoder use `fetch_k=50` (see [top_k vs fetch_k](#top_k-vs-fetch_k)); MMR uses `mmr_lambda=0.5` (`rag_hotpotqa_eval.py`). Submodular: **`--mixture-coefficient 0.6`** (weight on the FL term), **`greedy_algorithm=naive`** (default `naive_greedy_opt`)—the **Submodular** EM/ROUGE figures match that setup.*
+*All rows: 100 examples, `top_k=10`; MMR and two-stage cross-encoder use `fetch_k=50` (see [top_k vs fetch_k](#top_k-vs-fetch_k)); MMR uses `mmr_lambda=0.5` (`rag_hotpotqa_eval.py`). **Cross-encoder (full):** `python rag_hotpotqa_eval.py -m cross_encoder_full` (bi-encoder not loaded; default `--ce-predict-batch-size 32`). **Submodular (FL + MO):** **`--mixture-coefficient 0.6`**, bi-encoder modular term, **`greedy_algorithm=naive`**. **Submodular (FL + MO, CE mod.):** **`--modular-source cross_encoder --mixture-coefficient 0.4`** (FL weight \(\alpha = 0.4\)), same greedy; cross-encoder scores for the modular term (FL still uses the bi-encoder Gram); optional reproducibility: `--ce-predict-batch-size 32`, `--nonnegative-sim clip`, **`--eval-batch-size 8`** for LLM generation batching.*
 
 ### Full validation split
 
 The Hugging Face **distractor / validation** split has **7405** examples. Run it with:
 
 ```bash
-python rag_hotpotqa_eval.py --method <bm25|semantic_topk|mmr|cross_encoder> --full
-python rag_hotpotqa_eval_submodular.py --full   # submodular baseline; set PYTHONPATH to Submarine build
+python rag_hotpotqa_eval.py --method <bm25|semantic_topk|mmr|cross_encoder|cross_encoder_full> --full
+python rag_hotpotqa_eval_submodular.py --full   # submodular; set PYTHONPATH to Submarine build
+python rag_hotpotqa_eval_submodular.py --full --modular-source cross_encoder --mixture-coefficient 0.4   # CE modular (matches row below)
 ```
 
 
-| Retrieval method | Exact Match (EM) | ROUGE-L F1 |
-| ---------------- | ---------------- | ---------- |
-| BM25             | 27.8%            | 0.3739     |
-| Semantic top-k   | 26.3%            | 0.3569     |
-| MMR              | 26.7%            | 0.3623     |
-| Cross-encoder    | 32.3%            | 0.4312     |
+| Retrieval method              | Exact Match (EM) | ROUGE-L F1 |
+| ----------------------------- | ---------------- | ---------- |
+| BM25                          | 27.8%            | 0.3739     |
+| Semantic top-k                | 26.3%            | 0.3569     |
+| MMR                           | 26.7%            | 0.3623     |
+| Cross-encoder                 | 32.3%            | 0.4312     |
+| Submodular (FL + MO, CE mod.) | 31.1%            | 0.4207     |
 
 
-*Same `top_k` / `fetch_k` / `mmr_lambda` defaults as the 100-example runs unless you change them in `rag_hotpotqa_eval.py`.*
+*Same `top_k` / `fetch_k` / `mmr_lambda` defaults as the 100-example runs in `rag_hotpotqa_eval.py` unless you change them. **Submodular (FL + MO, CE mod.):** `rag_hotpotqa_eval_submodular.py --full --modular-source cross_encoder --mixture-coefficient 0.4` (same \(\alpha\) and settings as the 100-example CE-modular row).*
 
 ## Tech stack
 
@@ -134,14 +139,17 @@ python rag_hotpotqa_eval.py
 python rag_hotpotqa_eval.py --method bm25
 python rag_hotpotqa_eval.py -m cross_encoder --full
 python rag_hotpotqa_eval.py --method mmr --num-examples 500
+python rag_hotpotqa_eval.py -m cross_encoder_full
 
 # Submodular FL + MO (same 100-example default; naive greedy; export PYTHONPATH to Submarine)
 python rag_hotpotqa_eval_submodular.py
+# CE modular term (matches table row): α=0.4 on FL, naive greedy, LLM batch 8
+python rag_hotpotqa_eval_submodular.py --modular-source cross_encoder --mixture-coefficient 0.4 --eval-batch-size 8
 # Optional: accelerated / stochastic / parallel greedy instead of naive
 python rag_hotpotqa_eval_submodular.py --greedy-algorithm accelerated
 ```
 
-Metrics are written next to the script as `<method>.json` (e.g. `bm25.json`, `cross_encoder.json`, `submodular_fl_mo.json`).
+Metrics are written next to the script as `<method>.json` (e.g. `bm25.json`, `cross_encoder.json`, `cross_encoder_full.json`, `submodular_fl_mo.json`, `submodular_fl_mo_ce.json` when using `--modular-source cross_encoder`).
 
 ---
 
